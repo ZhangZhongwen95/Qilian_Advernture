@@ -1,6 +1,6 @@
 {
   "name": "祁连山海志 - 角色扮演冒险游戏",
-  "description": "以巍峨祁连山为背景的国风角色扮演冒险游戏，融合手绘山川、听山秘术、动态风雪与体温生存机制，支持桌面端与移动端，零外部依赖可直接部署于GitHub Pages。",
+  "description": "以青海与甘肃两省及巍峨祁连山为背景的国风角色扮演冒险游戏第二版。涵盖甘青所有重点县域独有地形与自然人文名胜、真实比例古风水墨3D导航舆图、九大民族特色自治县风情，兼具听山秘术、动态风雪与体温生存机制，零外部依赖支持直接部署GitHub Pages。",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

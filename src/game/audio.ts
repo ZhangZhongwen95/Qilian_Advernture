@@ -110,6 +110,11 @@ class SoundEngine {
     });
   }
 
+  // Pure chime sound for steles and prayer cairns
+  public playChime() {
+    this.playMountainListenChime();
+  }
+
   // Campfire crackle sound
   public playCampfireCrackle() {
     if (this.isMuted) return;

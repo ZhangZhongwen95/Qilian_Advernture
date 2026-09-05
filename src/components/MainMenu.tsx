@@ -1,5 +1,5 @@
 import React from 'react';
-import { Play, RotateCcw, BookOpen, Github, Compass, Volume2, VolumeX, Flame } from 'lucide-react';
+import { Play, RotateCcw, BookOpen, Github, Compass, Volume2, VolumeX, Flame, Library } from 'lucide-react';
 import { GameSaveData } from '../types';
 
 interface MainMenuProps {
@@ -9,6 +9,8 @@ interface MainMenuProps {
   onToggleMute: () => void;
   onStartNewGame: () => void;
   onContinueGame: () => void;
+  onOpen3DMap?: () => void;
+  onOpenChronicle?: () => void;
   onOpenLore: () => void;
   onOpenDeployGuide: () => void;
 }
@@ -20,6 +22,8 @@ export const MainMenu: React.FC<MainMenuProps> = ({
   onToggleMute,
   onStartNewGame,
   onContinueGame,
+  onOpen3DMap,
+  onOpenChronicle,
   onOpenLore,
   onOpenDeployGuide,
 }) => {
@@ -94,13 +98,35 @@ export const MainMenu: React.FC<MainMenuProps> = ({
             <span>{hasSave ? '重新开始历练' : '踏入祁连 (开始冒险)'}</span>
           </button>
 
+          {/* 3D Ink-Wash Map */}
+          {onOpen3DMap && (
+            <button
+              onClick={onOpen3DMap}
+              className="flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-amber-950/40 hover:bg-amber-900/60 text-amber-300 border border-amber-600/40 text-xs sm:text-sm font-medium transition"
+            >
+              <Compass className="w-4 h-4 text-amber-400" />
+              <span>甘青 3D 水墨舆图 (全县域·九大民族)</span>
+            </button>
+          )}
+
+          {/* 132 County Chronicle */}
+          {onOpenChronicle && (
+            <button
+              onClick={onOpenChronicle}
+              className="flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-stone-800/80 hover:bg-stone-700 text-amber-300 border border-amber-500/30 text-xs sm:text-sm font-medium transition"
+            >
+              <Library className="w-4 h-4 text-amber-400" />
+              <span>甘青百县风物大典 (132县风物志)</span>
+            </button>
+          )}
+
           {/* Lore / Encyclopedia */}
           <button
             onClick={onOpenLore}
             className="flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-stone-800/80 hover:bg-stone-800 text-stone-300 hover:text-stone-100 border border-stone-700 text-xs sm:text-sm transition"
           >
             <BookOpen className="w-4 h-4 text-amber-400" />
-            <span>祁连风物典册</span>
+            <span>风物典册 · 九大民族志</span>
           </button>
 
           {/* GitHub Pages Deploy & Readme */}

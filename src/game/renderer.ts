@@ -1,4 +1,4 @@
-import { InteractiveObject, NPC, PlayerState, WeatherType, ZoneConfig, ZoneId } from '../types';
+import { CountyData, InteractiveObject, NPC, PlayerState, WeatherType, ZoneConfig, ZoneId } from '../types';
 
 export interface Snowflake {
   x: number;
@@ -43,7 +43,8 @@ export class GameRenderer {
     npcs: NPC[],
     objects: InteractiveObject[],
     weather: WeatherType,
-    deltaTime: number
+    deltaTime: number,
+    activeCounty?: CountyData
   ) {
     this.time += deltaTime;
     const ctx = this.ctx;
@@ -51,16 +52,21 @@ export class GameRenderer {
     const height = this.canvas.height;
 
     // 1. Draw Sky & Horizon
-    this.drawSky(zone, width, height);
+    this.drawSky(zone, width, height, activeCounty);
 
     // 2. Draw Distant Mountain Ranges (Parallax & Ink-Wash Style)
-    this.drawDistantPeaks(zone, width, height);
+    this.drawDistantPeaks(zone, width, height, activeCounty);
 
     // 3. Draw Mid-ground terrain & features (Danxia ridges, spruce pines, yurts, beacon towers)
     this.drawMidground(zone, width, height);
 
+    // 3.5. Draw Specific Ethnic Scenery (Yurts, prayer flags, wheel swings, camel traces)
+    if (activeCounty) {
+      this.drawEthnicScenery(activeCounty, width, height);
+    }
+
     // 4. Draw Ground / Trail / Snow Field
-    this.drawGround(zone, width, height);
+    this.drawGround(zone, width, height, activeCounty);
 
     // 5. Draw Interactive Objects (Campfires, steles, altars, herbs)
     this.drawObjects(objects, zone.id, player.isListening);
@@ -76,6 +82,11 @@ export class GameRenderer {
       this.drawListeningEffect(player, objects, width, height);
     }
 
+    // 8.5. Draw County Title Calligraphy Watermark (Top-Left)
+    if (activeCounty) {
+      this.drawCountyWatermark(activeCounty, width, height);
+    }
+
     // 9. Weather Particle Systems (Snow, Blizzard, Mist)
     this.drawWeather(weather, width, height);
 
@@ -85,11 +96,201 @@ export class GameRenderer {
     }
   }
 
-  private drawSky(zone: ZoneConfig, w: number, h: number) {
+  private drawCountyWatermark(county: CountyData, w: number, h: number) {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+    ctx.font = 'bold 15px serif';
+    ctx.textAlign = 'left';
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
+    ctx.shadowBlur = 6;
+    ctx.fillText(`【${county.province} · ${county.name}】`, 20, h * 0.12);
+
+    ctx.font = '11px sans-serif';
+    ctx.fillStyle = 'rgba(251, 191, 36, 0.9)';
+    ctx.fillText(`${county.terrainType} · ${county.naturalLandmark.name}`, 24, h * 0.12 + 18);
+    ctx.restore();
+  }
+
+  private drawEthnicScenery(county: CountyData, w: number, h: number) {
+    const ctx = this.ctx;
+    ctx.save();
+
+    // 1. Tibetan (藏族): Five-color prayer flags (风马旗) strung across the mountain pass
+    if (county.ethnicGroup === '藏族') {
+      const pole1X = w * 0.18;
+      const pole1Y = h * 0.52;
+      const pole2X = w * 0.42;
+      const pole2Y = h * 0.48;
+
+      ctx.strokeStyle = '#78350f';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(pole1X, pole1Y + 40);
+      ctx.lineTo(pole1X, pole1Y);
+      ctx.moveTo(pole2X, pole2Y + 40);
+      ctx.lineTo(pole2X, pole2Y);
+      ctx.stroke();
+
+      // String line
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(pole1X, pole1Y + 5);
+      ctx.quadraticCurveTo((pole1X + pole2X) / 2, pole1Y + 22, pole2X, pole2Y + 5);
+      ctx.stroke();
+
+      // Five-color prayer flags (Blue, White, Red, Green, Yellow)
+      const flagColors = ['#2563eb', '#f8fafc', '#dc2626', '#16a34a', '#eab308'];
+      const numFlags = 8;
+      for (let i = 0; i < numFlags; i++) {
+        const t = (i + 0.5) / numFlags;
+        const fx = pole1X + (pole2X - pole1X) * t;
+        const fy = pole1Y + (pole2Y - pole1Y) * t + Math.sin(t * Math.PI) * 16;
+        const color = flagColors[i % flagColors.length];
+
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(fx, fy);
+        ctx.lineTo(fx + 8, fy + 12 + Math.sin(this.time * 4 + i) * 3);
+        ctx.lineTo(fx - 4, fy + 10);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+
+    // 2. Yugur, Kazakh, Mongolian (裕固族 / 哈萨克族 / 蒙古族): Traditional Yurt (毡房)
+    if (county.ethnicGroup === '裕固族' || county.ethnicGroup === '哈萨克族' || county.ethnicGroup === '蒙古族') {
+      const yurtX = w * 0.72;
+      const yurtY = h * 0.58;
+      const yurtW = 75;
+      const yurtH = 42;
+
+      // Dome
+      ctx.fillStyle = '#f8fafc';
+      ctx.beginPath();
+      ctx.ellipse(yurtX, yurtY, yurtW / 2, yurtH / 2, 0, Math.PI, 0);
+      ctx.fill();
+      ctx.strokeStyle = '#94a3b8';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Base wall
+      ctx.fillRect(yurtX - yurtW / 2, yurtY, yurtW, 20);
+      ctx.strokeRect(yurtX - yurtW / 2, yurtY, yurtW, 20);
+
+      // Red / Gold Ethnic Ribbon Pattern on Yurt
+      ctx.strokeStyle = county.ethnicGroup === '裕固族' ? '#dc2626' : '#0284c7';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(yurtX - yurtW / 2, yurtY + 2);
+      ctx.lineTo(yurtX + yurtW / 2, yurtY + 2);
+      ctx.stroke();
+
+      // Yurt door
+      ctx.fillStyle = '#78350f';
+      ctx.fillRect(yurtX - 9, yurtY + 4, 18, 16);
+
+      // Smoke rising from top chimney
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      for (let s = 0; s < 3; s++) {
+        const sy = yurtY - yurtH / 2 - 8 - s * 10 - ((this.time * 15) % 30);
+        const sx = yurtX + Math.sin(this.time * 2 + s) * 6;
+        ctx.beginPath();
+        ctx.arc(sx, sy, 4 + s * 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // 3. Salar / Hui / Dongxiang (撒拉族 / 回族 / 东乡族): Wooden hurdle house / Brick eaves
+    if (county.ethnicGroup === '撒拉族' || county.ethnicGroup === '回族' || county.ethnicGroup === '东乡族') {
+      const houseX = w * 0.75;
+      const houseY = h * 0.56;
+
+      // Adobe earthen building
+      ctx.fillStyle = '#a16207';
+      ctx.fillRect(houseX, houseY, 65, 38);
+
+      // Eaves roof
+      ctx.fillStyle = '#451a03';
+      ctx.beginPath();
+      ctx.moveTo(houseX - 8, houseY);
+      ctx.lineTo(houseX + 32, houseY - 14);
+      ctx.lineTo(houseX + 73, houseY);
+      ctx.closePath();
+      ctx.fill();
+
+      // Red chili peppers hanging string (for Xunhua Salar / Dongxiang)
+      if (county.ethnicGroup === '撒拉族') {
+        ctx.fillStyle = '#ef4444';
+        for (let p = 0; p < 5; p++) {
+          ctx.beginPath();
+          ctx.ellipse(houseX + 8, houseY + 6 + p * 5, 2.5, 4, 0.2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+
+    // 4. Tu (土族): Rainbow festival ribbons (七彩花线)
+    if (county.ethnicGroup === '土族') {
+      const poleX = w * 0.25;
+      const poleY = h * 0.56;
+      ctx.strokeStyle = '#854d0e';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(poleX, poleY + 50);
+      ctx.lineTo(poleX, poleY);
+      ctx.stroke();
+
+      // Wheel on pole top (Lunziqu)
+      ctx.strokeStyle = '#ca8a04';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(poleX, poleY, 14, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Rainbow ribbons hanging down
+      const rainbow = ['#ef4444', '#f59e0b', '#eab308', '#22c55e', '#3b82f6'];
+      rainbow.forEach((color, idx) => {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(poleX, poleY);
+        ctx.lineTo(poleX - 18 + idx * 9 + Math.sin(this.time * 3 + idx) * 5, poleY + 36);
+        ctx.stroke();
+      });
+    }
+
+    // 5. Han / Dunhuang (汉族 / 丝路敦煌): Ancient Beacon Tower (汉唐烽燧)
+    if (county.ethnicGroup === '汉族/多元' || county.id === 'dunhuang') {
+      const towerX = w * 0.82;
+      const towerY = h * 0.52;
+
+      ctx.fillStyle = '#b45309';
+      ctx.beginPath();
+      ctx.moveTo(towerX, towerY + 45);
+      ctx.lineTo(towerX + 8, towerY);
+      ctx.lineTo(towerX + 38, towerY);
+      ctx.lineTo(towerX + 46, towerY + 45);
+      ctx.closePath();
+      ctx.fill();
+
+      // Battlements
+      ctx.fillStyle = '#92400e';
+      ctx.fillRect(towerX + 6, towerY - 6, 10, 6);
+      ctx.fillRect(towerX + 30, towerY - 6, 10, 6);
+    }
+
+    ctx.restore();
+  }
+
+  private drawSky(zone: ZoneConfig, w: number, h: number, activeCounty?: CountyData) {
     const ctx = this.ctx;
     const grad = ctx.createLinearGradient(0, 0, 0, h * 0.7);
-    grad.addColorStop(0, zone.bgPalette.skyTop);
-    grad.addColorStop(1, zone.bgPalette.skyBottom);
+    const topColor = activeCounty ? activeCounty.bgPalette.skyTop : zone.bgPalette.skyTop;
+    const bottomColor = activeCounty ? activeCounty.bgPalette.skyBottom : zone.bgPalette.skyBottom;
+    grad.addColorStop(0, topColor);
+    grad.addColorStop(1, bottomColor);
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, w, h);
 
@@ -116,12 +317,12 @@ export class GameRenderer {
     }
   }
 
-  private drawDistantPeaks(zone: ZoneConfig, w: number, h: number) {
+  private drawDistantPeaks(zone: ZoneConfig, w: number, h: number, activeCounty?: CountyData) {
     const ctx = this.ctx;
 
     // Distant snow mountains (Qilian main ridge)
     ctx.save();
-    ctx.fillStyle = zone.bgPalette.mountainFar;
+    ctx.fillStyle = activeCounty ? activeCounty.bgPalette.mountainFar : zone.bgPalette.mountainFar;
     ctx.beginPath();
     ctx.moveTo(0, h * 0.55);
 
@@ -449,13 +650,14 @@ export class GameRenderer {
     ctx.restore();
   }
 
-  private drawGround(zone: ZoneConfig, w: number, h: number) {
+  private drawGround(zone: ZoneConfig, w: number, h: number, activeCounty?: CountyData) {
     const ctx = this.ctx;
     ctx.save();
     const groundY = h * 0.62;
 
+    const groundColor = activeCounty ? activeCounty.bgPalette.ground : zone.bgPalette.ground;
     const grad = ctx.createLinearGradient(0, groundY, 0, h);
-    grad.addColorStop(0, zone.bgPalette.ground);
+    grad.addColorStop(0, groundColor);
     grad.addColorStop(1, '#1c1917');
     ctx.fillStyle = grad;
     ctx.fillRect(0, groundY, w, h - groundY);

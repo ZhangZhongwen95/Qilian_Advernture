@@ -1,32 +1,46 @@
 import React from 'react';
-import { Flame, Compass, Backpack, BookOpen, Volume2, VolumeX, ShieldAlert, Ear, Github, HelpCircle } from 'lucide-react';
-import { PlayerState, Quest, WeatherType, ZoneConfig } from '../types';
+import { Flame, Compass, Backpack, BookOpen, Volume2, VolumeX, ShieldAlert, Ear, Github, HelpCircle, Globe2, Sparkles, Award, Library } from 'lucide-react';
+import { CountyData, CountyQuest, PlayerState, Quest, WeatherType, ZoneConfig } from '../types';
 
 interface GameHUDProps {
   zone: ZoneConfig;
   player: PlayerState;
+  currentCounty?: CountyData;
   activeQuest?: Quest;
+  countyQuest?: CountyQuest;
   isMuted: boolean;
+  visitedCounties?: string[];
+  completedCountyQuests?: string[];
   onToggleMute: () => void;
   onOpenInventory: () => void;
   onOpenMap: () => void;
+  onOpen3DMap: () => void;
+  onOpenChronicle?: () => void;
   onOpenLore: () => void;
   onOpenDeployGuide: () => void;
   onListen: () => void;
+  onOpenAdventure?: () => void;
   nearbyPrompt: string | null;
 }
 
 export const GameHUD: React.FC<GameHUDProps> = ({
   zone,
   player,
+  currentCounty,
   activeQuest,
+  countyQuest,
   isMuted,
+  visitedCounties = [],
+  completedCountyQuests = [],
   onToggleMute,
   onOpenInventory,
   onOpenMap,
+  onOpen3DMap,
+  onOpenChronicle,
   onOpenLore,
   onOpenDeployGuide,
   onListen,
+  onOpenAdventure,
   nearbyPrompt,
 }) => {
   // Temperature color styling
@@ -50,8 +64,20 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           {/* Location Badge */}
           <div className="flex items-center gap-2 bg-stone-900/85 backdrop-blur-md px-3.5 py-1.5 rounded-lg border border-stone-700/60 shadow-lg text-sm">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-            <span className="font-semibold text-stone-100">{zone.name}</span>
-            <span className="text-stone-400 text-xs">海拔 {zone.altitude}m</span>
+            <span className="font-semibold text-stone-100">
+              {currentCounty ? `${currentCounty.province} · ${currentCounty.name}` : zone.name}
+            </span>
+            {currentCounty && visitedCounties.includes(currentCounty.id) && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-0.5">
+                <Award className="w-3 h-3" /> 已通关
+              </span>
+            )}
+            {currentCounty?.isAutonomous && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                {currentCounty.ethnicGroup}自治县
+              </span>
+            )}
+            <span className="text-stone-400 text-xs">海拔 {currentCounty?.altitude || zone.altitude}m</span>
             <span
               className={`text-xs px-2 py-0.5 rounded border font-medium ${weatherLabel[zone.weather].bg}`}
             >
@@ -129,6 +155,43 @@ export const GameHUD: React.FC<GameHUDProps> = ({
               <span>听山</span>
             </button>
 
+            {onOpenChronicle && (
+              <button
+                id="hud-chronicle-btn"
+                onClick={onOpenChronicle}
+                title="打开【甘青百县风物大典】(全132县风物、名宿、任务与信物)"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-stone-950 transition-colors shadow-sm"
+              >
+                <Library className="w-3.5 h-3.5 text-stone-950" />
+                <span>百县大典</span>
+                <span className="text-[10px] bg-stone-950/30 px-1 rounded font-mono">
+                  {visitedCounties.length}/132
+                </span>
+              </button>
+            )}
+
+            <button
+              id="hud-3dmap-btn"
+              onClick={onOpen3DMap}
+              title="甘青 3D 水墨舆图"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-stone-800/80 hover:bg-stone-700 text-stone-200 transition-colors border border-stone-700/60"
+            >
+              <Globe2 className="w-3.5 h-3.5 text-amber-400" />
+              <span>3D 舆图</span>
+            </button>
+
+            {onOpenAdventure && (
+              <button
+                id="hud-adventure-btn"
+                onClick={onOpenAdventure}
+                title="触发当前县城专属山海奇遇 (文字冒险)"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-stone-100 transition-colors shadow-sm border border-amber-500/40"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                <span>山海奇遇</span>
+              </button>
+            )}
+
             <button
               id="hud-bag-btn"
               onClick={onOpenInventory}
@@ -177,17 +240,37 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             </button>
           </div>
 
-          {/* Active Quest Card */}
-          {activeQuest && (
-            <div className="bg-stone-900/90 backdrop-blur-md p-3 rounded-xl border border-stone-800/80 shadow-xl max-w-xs text-right">
-              <div className="text-[11px] font-medium text-amber-400 flex items-center justify-end gap-1 mb-1">
-                <HelpCircle className="w-3 h-3" />
-                <span>当前历练卷轴</span>
+          {/* Active Quests (Main & County Specific) */}
+          <div className="flex flex-col gap-2 max-w-xs text-right">
+            {countyQuest && (
+              <div className="bg-stone-900/90 backdrop-blur-md p-2.5 rounded-xl border border-amber-500/40 shadow-xl text-right">
+                <div className="text-[10px] font-medium text-amber-300 flex items-center justify-end gap-1 mb-0.5">
+                  <Sparkles className="w-3 h-3 text-amber-400" />
+                  <span>县域风物委托</span>
+                  {currentCounty && completedCountyQuests.includes(currentCounty.id) && (
+                    <span className="text-[9px] px-1 bg-emerald-500/20 text-emerald-300 rounded border border-emerald-500/30">
+                      ✓ 已达成
+                    </span>
+                  )}
+                </div>
+                <h4 className="text-xs font-bold text-amber-100">{countyQuest.title}</h4>
+                <p className="text-[11px] text-stone-300 mt-0.5 leading-relaxed line-clamp-2">
+                  {countyQuest.objective}
+                </p>
               </div>
-              <h4 className="text-sm font-bold text-stone-100">{activeQuest.title}</h4>
-              <p className="text-xs text-stone-400 mt-1 leading-relaxed">{activeQuest.objective}</p>
-            </div>
-          )}
+            )}
+
+            {activeQuest && (
+              <div className="bg-stone-900/80 backdrop-blur-md p-2.5 rounded-xl border border-stone-800/80 shadow-xl text-right">
+                <div className="text-[10px] font-medium text-sky-400 flex items-center justify-end gap-1 mb-0.5">
+                  <HelpCircle className="w-3 h-3" />
+                  <span>主线历练</span>
+                </div>
+                <h4 className="text-xs font-bold text-stone-100">{activeQuest.title}</h4>
+                <p className="text-[11px] text-stone-400 mt-0.5 leading-relaxed">{activeQuest.objective}</p>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

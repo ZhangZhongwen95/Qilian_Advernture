@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { GameRenderer } from './game/renderer';
 import { sound } from './game/audio';
 import {
@@ -29,6 +29,12 @@ import { LoreModal } from './components/LoreModal';
 import { EndingModal } from './components/EndingModal';
 import { DeployGuideModal } from './components/DeployGuideModal';
 import { MobileControls } from './components/MobileControls';
+import { InkWashMap3D } from './components/InkWashMap3D';
+import { CountyAdventureModal } from './components/CountyAdventureModal';
+import { CountyChronicleModal } from './components/CountyChronicleModal';
+import { COUNTIES_DATA, getCountyById } from './game/countyData';
+import { generateCountyLevel, GeneratedCountyLevel } from './game/countyLevelEngine';
+import { CountyData } from './types';
 
 const SAVE_KEY = 'qilian_shanhai_save_v1';
 
@@ -40,6 +46,12 @@ export default function App() {
   const [showCampfireModal, setShowCampfireModal] = useState(false);
   const [showInventoryModal, setShowInventoryModal] = useState(false);
   const [showMapModal, setShowMapModal] = useState(false);
+  const [show3DMapModal, setShow3DMapModal] = useState(false);
+  const [showChronicleModal, setShowChronicleModal] = useState(false);
+  const [showAdventureModal, setShowAdventureModal] = useState(false);
+  const [currentCountyId, setCurrentCountyId] = useState<string>('sunan');
+  const [visitedCounties, setVisitedCounties] = useState<string[]>(['sunan']);
+  const [completedCountyQuests, setCompletedCountyQuests] = useState<string[]>([]);
   const [showLoreModal, setShowLoreModal] = useState(false);
   const [showDeployGuide, setShowDeployGuide] = useState(false);
   const [endingType, setEndingType] = useState<'guardian' | 'harmony' | null>(null);
@@ -51,6 +63,7 @@ export default function App() {
     targetX: 240,
     targetY: 350,
     zone: 'meadow',
+    currentCountyId: 'sunan',
     direction: 'right',
     moving: false,
     bodyTemp: 37.0,
@@ -61,15 +74,40 @@ export default function App() {
     isListening: false,
     listeningTimer: 0,
     listeningRadius: 280,
+    visitedCounties: ['sunan'],
   });
 
   const [inventory, setInventory] = useState<Item[]>(INITIAL_INVENTORY);
   const [unlockedZones, setUnlockedZones] = useState<ZoneId[]>(['meadow']);
   const [completedQuestIds, setCompletedQuestIds] = useState<string[]>([]);
   const [currentQuestId, setCurrentQuestId] = useState<string>('q1');
-  const [interactiveObjects, setInteractiveObjects] = useState<InteractiveObject[]>(INTERACTIVE_OBJECTS);
+  const [collectedObjectIds, setCollectedObjectIds] = useState<string[]>([]);
+  const [litCampfireIds, setLitCampfireIds] = useState<string[]>([]);
   const [nearbyPrompt, setNearbyPrompt] = useState<string | null>(null);
   const [hasSave, setHasSave] = useState(false);
+
+  // Procedural County Level Definition
+  const currentCounty = useMemo(() => getCountyById(currentCountyId), [currentCountyId]);
+  const currentLevel = useMemo(() => generateCountyLevel(currentCounty), [currentCounty]);
+
+  const activeObjects = useMemo(() => {
+    return currentLevel.interactiveObjects.map((obj) => ({
+      ...obj,
+      collected: collectedObjectIds.includes(obj.id),
+      lit: obj.type === 'campfire' ? (litCampfireIds.includes(obj.id) || obj.lit) : obj.lit,
+    }));
+  }, [currentLevel, collectedObjectIds, litCampfireIds]);
+
+  const activeNPC = currentLevel.npc;
+  const activeNPCs = useMemo(() => [activeNPC], [activeNPC]);
+
+  const allDialogues = useMemo(
+    () => ({
+      ...DIALOGUES,
+      ...currentLevel.dialogues,
+    }),
+    [currentLevel]
+  );
 
   // Canvas & Engine refs
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -96,13 +134,20 @@ export default function App() {
   const saveGame = useCallback(() => {
     try {
       const saveData: GameSaveData = {
-        player,
+        player: {
+          ...player,
+          currentCountyId,
+          visitedCounties,
+          completedCountyQuests,
+        },
         inventory,
         completedQuests: completedQuestIds,
+        completedCountyQuests,
         currentQuestId,
         unlockedZones,
-        collectedObjects: interactiveObjects.filter((o) => o.collected).map((o) => o.id),
-        litCampfires: interactiveObjects.filter((o) => o.type === 'campfire' && o.lit).map((o) => o.id),
+        collectedObjects: collectedObjectIds,
+        litCampfires: litCampfireIds,
+        visitedCounties,
         activeEnding: endingType || undefined,
         timestamp: Date.now(),
       };
@@ -111,7 +156,19 @@ export default function App() {
     } catch (e) {
       console.warn('Failed to save to localStorage', e);
     }
-  }, [player, inventory, completedQuestIds, currentQuestId, unlockedZones, interactiveObjects, endingType]);
+  }, [
+    player,
+    currentCountyId,
+    visitedCounties,
+    completedCountyQuests,
+    inventory,
+    completedQuestIds,
+    currentQuestId,
+    unlockedZones,
+    collectedObjectIds,
+    litCampfireIds,
+    endingType,
+  ]);
 
   // Load game
   const loadGame = useCallback(() => {
@@ -119,18 +176,58 @@ export default function App() {
       const raw = localStorage.getItem(SAVE_KEY);
       if (!raw) return;
       const data: GameSaveData = JSON.parse(raw);
-      setPlayer(data.player);
-      setInventory(data.inventory);
-      setCompletedQuestIds(data.completedQuests);
-      setCurrentQuestId(data.currentQuestId);
-      setUnlockedZones(data.unlockedZones);
-      setInteractiveObjects((prev) =>
-        prev.map((obj) => ({
-          ...obj,
-          collected: data.collectedObjects.includes(obj.id),
-          lit: obj.type === 'campfire' ? data.litCampfires.includes(obj.id) : obj.lit,
-        }))
-      );
+      const loadedVisited = Array.isArray(data.visitedCounties) && data.visitedCounties.length > 0
+        ? data.visitedCounties
+        : Array.isArray(data.player?.visitedCounties) && data.player.visitedCounties.length > 0
+        ? data.player.visitedCounties
+        : ['sunan'];
+      const loadedCounty = data.player?.currentCountyId || 'sunan';
+
+      setPlayer({
+        x: 240,
+        y: 350,
+        targetX: 240,
+        targetY: 350,
+        zone: 'meadow',
+        direction: 'right',
+        moving: false,
+        bodyTemp: 37.0,
+        maxBodyTemp: 37.0,
+        stamina: 100,
+        maxStamina: 100,
+        coldResistanceTimer: 0,
+        isListening: false,
+        listeningTimer: 0,
+        listeningRadius: 280,
+        ...(data.player || {}),
+        currentCountyId: loadedCounty,
+        visitedCounties: loadedVisited,
+      });
+
+      setCurrentCountyId(loadedCounty);
+      setVisitedCounties(loadedVisited);
+
+      if (data.collectedObjects && Array.isArray(data.collectedObjects)) {
+        setCollectedObjectIds(data.collectedObjects);
+      }
+      if (data.litCampfires && Array.isArray(data.litCampfires)) {
+        setLitCampfireIds(data.litCampfires);
+      }
+      if (data.inventory && Array.isArray(data.inventory)) {
+        setInventory(data.inventory);
+      }
+      if (data.completedQuests && Array.isArray(data.completedQuests)) {
+        setCompletedQuestIds(data.completedQuests);
+      }
+      if (data.completedCountyQuests && Array.isArray(data.completedCountyQuests)) {
+        setCompletedCountyQuests(data.completedCountyQuests);
+      }
+      if (data.currentQuestId) {
+        setCurrentQuestId(data.currentQuestId);
+      }
+      if (data.unlockedZones && Array.isArray(data.unlockedZones)) {
+        setUnlockedZones(data.unlockedZones);
+      }
       if (data.activeEnding) {
         setEndingType(data.activeEnding);
       }
@@ -150,6 +247,7 @@ export default function App() {
       targetX: 240,
       targetY: 350,
       zone: 'meadow',
+      currentCountyId: 'sunan',
       direction: 'right',
       moving: false,
       bodyTemp: 37.0,
@@ -160,12 +258,16 @@ export default function App() {
       isListening: false,
       listeningTimer: 0,
       listeningRadius: 280,
+      visitedCounties: ['sunan'],
     });
     setInventory(INITIAL_INVENTORY);
     setUnlockedZones(['meadow']);
     setCompletedQuestIds([]);
     setCurrentQuestId('q1');
-    setInteractiveObjects(INTERACTIVE_OBJECTS);
+    setCurrentCountyId('sunan');
+    setVisitedCounties(['sunan']);
+    setCollectedObjectIds([]);
+    setLitCampfireIds([]);
     setEndingType(null);
     setInGame(true);
     sound.startWind(0.3);
@@ -252,39 +354,25 @@ export default function App() {
       isListening: true,
       listeningTimer: 5.0, // active for 5 seconds
     }));
-
-    // Reveal hidden objects in the current zone
-    setInteractiveObjects((prev) =>
-      prev.map((obj) => {
-        if (obj.zone === player.zone && obj.discoveredOnlyByListening) {
-          return { ...obj, revealed: true };
-        }
-        return obj;
-      })
-    );
-  }, [player.isListening, player.zone]);
+  }, [player.isListening]);
 
   // Player interaction with nearby NPCs / Objects
   const handleInteract = useCallback(() => {
     if (activeDialogue) return;
 
-    // Check NPC interaction
-    const currentNPCs = NPCS.filter((n) => n.zone === player.zone);
-    for (const npc of currentNPCs) {
-      const dist = Math.hypot(player.x - npc.x, player.y - npc.y);
-      if (dist < 60) {
-        sound.playPickup();
-        const dialogue = DIALOGUES[npc.dialogueId];
-        if (dialogue) {
-          setActiveDialogue(dialogue);
-          return;
-        }
+    // 1. Check NPC interaction
+    const distNPC = Math.hypot(player.x - activeNPC.x, player.y - activeNPC.y);
+    if (distNPC < 65) {
+      sound.playPickup();
+      const dialogue = allDialogues[activeNPC.dialogueId] || allDialogues.intro_greeting;
+      if (dialogue) {
+        setActiveDialogue(dialogue);
+        return;
       }
     }
 
-    // Check Interactive Objects
-    const currentObjs = interactiveObjects.filter((o) => o.zone === player.zone);
-    for (const obj of currentObjs) {
+    // 2. Check Interactive Objects
+    for (const obj of activeObjects) {
       if (obj.discoveredOnlyByListening && !obj.revealed && !player.isListening) {
         continue;
       }
@@ -292,99 +380,76 @@ export default function App() {
       if (dist < 65) {
         if (obj.type === 'campfire') {
           sound.playCampfireCrackle();
-          // Ensure campfire is lit
           if (!obj.lit) {
-            setInteractiveObjects((prev) =>
-              prev.map((o) => (o.id === obj.id ? { ...o, lit: true } : o))
-            );
+            setLitCampfireIds((prev) => Array.from(new Set([...prev, obj.id])));
           }
           setShowCampfireModal(true);
           return;
-        } else if (obj.type === 'passage') {
-          handlePassage(obj.id);
+        } else if (obj.type === 'stele') {
+          sound.playChime();
+          setShowAdventureModal(true);
           return;
-        } else if (obj.type === 'chest' && !obj.collected) {
-          sound.playPickup();
-          setInteractiveObjects((prev) =>
-            prev.map((o) => (o.id === obj.id ? { ...o, collected: true } : o))
-          );
-          // Grant Qilian ancient mirror
-          setInventory((prev) => [
-            ...prev,
-            {
-              id: 'bronze_mirror',
-              name: '祁连辟邪古铜镜',
-              category: 'relic',
-              icon: '🪞',
-              description: '汉唐戍边将士以昆仑神铜铸造的辟邪宝镜，可折射高山晨曦金光，穿透万古冰川寒雾。',
-              count: 1,
-            },
-          ]);
-          setCompletedQuestIds((prev) => Array.from(new Set([...prev, 'q2'])));
-          setCurrentQuestId('q3');
-          setUnlockedZones((prev) => Array.from(new Set([...prev, 'forest'] as ZoneId[])));
+        } else if (obj.type === 'passage') {
+          sound.playFootstep();
+          setShow3DMapModal(true);
+          return;
+        } else if (obj.type === 'prayer_cairn') {
+          sound.playChime();
+          setPlayer((p) => {
+            const existingVisited = Array.isArray(p?.visitedCounties) ? p.visitedCounties : ['sunan'];
+            return {
+              ...p,
+              stamina: p.maxStamina,
+              bodyTemp: Math.max(36.5, p.bodyTemp),
+              coldResistanceTimer: p.coldResistanceTimer + 60,
+              visitedCounties: Array.from(new Set([...existingVisited, currentCountyId])),
+            };
+          });
+          setVisitedCounties((prev) => Array.from(new Set([...(Array.isArray(prev) ? prev : []), currentCountyId])));
+          setCompletedCountyQuests((prev) => Array.from(new Set([...prev, currentCountyId])));
           return;
         } else if (obj.type === 'herb' && !obj.collected) {
           sound.playPickup();
-          setInteractiveObjects((prev) =>
-            prev.map((o) => (o.id === obj.id ? { ...o, collected: true } : o))
-          );
+          setCollectedObjectIds((prev) => Array.from(new Set([...prev, obj.id])));
+          const specialty = currentLevel.specialtyItem;
           setInventory((prev) => {
-            const existing = prev.find((i) => i.id === 'snow_lotus');
+            const existing = prev.find((i) => i.id === specialty.id);
             if (existing) {
-              return prev.map((i) => (i.id === 'snow_lotus' ? { ...i, count: i.count + 1 } : i));
+              return prev.map((i) => (i.id === specialty.id ? { ...i, count: i.count + 1 } : i));
             }
-            return [
-              ...prev,
-              {
-                id: 'snow_lotus',
-                name: '绝壁野生祁连雪莲',
-                category: 'medicine',
-                icon: '🪷',
-                description: '生长在海拔3800米悬崖绝壁的万年圣草。服用后完全回满体温与精力，永久增加抵御寒风能力。',
-                count: 1,
-                effect: { temp: 5.0, stamina: 100, resistColdSec: 90 },
-              },
-            ];
+            return [...prev, specialty];
           });
-          setCompletedQuestIds((prev) => Array.from(new Set([...prev, 'q3'])));
-          setCurrentQuestId('q4');
-          setUnlockedZones((prev) => Array.from(new Set([...prev, 'glacier'] as ZoneId[])));
           return;
-        } else if (obj.type === 'stele') {
-          if (obj.id === 'glacier_altar') {
-            const spiritNPC = NPCS.find((n) => n.id === 'mountain_spirit');
-            if (spiritNPC) {
-              setActiveDialogue(DIALOGUES.spirit_greeting);
+        } else if (obj.type === 'chest' && !obj.collected) {
+          sound.playPickup();
+          setCollectedObjectIds((prev) => Array.from(new Set([...prev, obj.id])));
+          const relic = currentLevel.relicItem;
+          setInventory((prev) => {
+            const existing = prev.find((i) => i.id === relic.id);
+            if (existing) {
+              return prev.map((i) => (i.id === relic.id ? { ...i, count: i.count + 1 } : i));
             }
-          }
+            return [...prev, relic];
+          });
+          setCompletedCountyQuests((prev) => Array.from(new Set([...prev, currentCountyId])));
+          return;
         }
       }
     }
-  }, [activeDialogue, player, interactiveObjects]);
+  }, [
+    activeDialogue,
+    player,
+    activeNPC,
+    activeObjects,
+    allDialogues,
+    currentCountyId,
+    currentLevel,
+  ]);
 
-  // Passage between zones
-  const handlePassage = useCallback((passageId: string) => {
+  // Passage opens 3D Ink-Wash Map for free county roaming
+  const handlePassage = useCallback(() => {
     sound.playFootstep();
-    if (passageId === 'meadow_passage') {
-      setPlayer((p) => ({ ...p, zone: 'danxia', x: 100, y: 340 }));
-      setUnlockedZones((prev) => Array.from(new Set([...prev, 'danxia'] as ZoneId[])));
-      setCurrentQuestId('q2');
-    } else if (passageId === 'danxia_passage_back') {
-      setPlayer((p) => ({ ...p, zone: 'meadow', x: 800, y: 340 }));
-    } else if (passageId === 'danxia_passage_next') {
-      setPlayer((p) => ({ ...p, zone: 'forest', x: 100, y: 350 }));
-      setUnlockedZones((prev) => Array.from(new Set([...prev, 'forest'] as ZoneId[])));
-      setCurrentQuestId('q3');
-    } else if (passageId === 'forest_passage_back') {
-      setPlayer((p) => ({ ...p, zone: 'danxia', x: 800, y: 340 }));
-    } else if (passageId === 'forest_passage_next') {
-      setPlayer((p) => ({ ...p, zone: 'glacier', x: 100, y: 340 }));
-      setUnlockedZones((prev) => Array.from(new Set([...prev, 'glacier'] as ZoneId[])));
-      setCurrentQuestId('q4');
-    } else if (passageId === 'glacier_passage_back') {
-      setPlayer((p) => ({ ...p, zone: 'forest', x: 800, y: 350 }));
-    }
+    setShow3DMapModal(true);
   }, []);
 
   // Main Game Animation & Physics Loop
@@ -443,13 +508,13 @@ export default function App() {
         }
 
         // 2. Temperature drain calculation
-        const currentZoneConfig = ZONES[prev.zone];
+        const currentZoneConfig = currentLevel.zoneConfig;
         let newTemp = prev.bodyTemp;
         let newColdTimer = Math.max(0, prev.coldResistanceTimer - dt);
 
         // Check if near lit campfire
-        const litCampfire = interactiveObjects.find(
-          (o) => o.zone === prev.zone && o.type === 'campfire' && o.lit && Math.hypot(prev.x - o.x, prev.y - o.y) < 110
+        const litCampfire = activeObjects.find(
+          (o) => o.type === 'campfire' && o.lit && Math.hypot(prev.x - o.x, prev.y - o.y) < 110
         );
         activeCampfireNearbyRef.current = litCampfire || null;
 
@@ -504,19 +569,13 @@ export default function App() {
       });
 
       // Check nearby interactables for prompt
-      const zoneNPCs = NPCS.filter((n) => n.zone === player.zone);
       let foundPrompt: string | null = null;
-
-      for (const npc of zoneNPCs) {
-        if (Math.hypot(player.x - npc.x, player.y - npc.y) < 65) {
-          foundPrompt = `与 ${npc.name} 对话`;
-          break;
-        }
+      if (Math.hypot(player.x - activeNPC.x, player.y - activeNPC.y) < 65) {
+        foundPrompt = `与 ${activeNPC.name} 对话`;
       }
 
       if (!foundPrompt) {
-        const zoneObjs = interactiveObjects.filter((o) => o.zone === player.zone);
-        for (const obj of zoneObjs) {
+        for (const obj of activeObjects) {
           if (obj.discoveredOnlyByListening && !obj.revealed && !player.isListening) {
             continue;
           }
@@ -531,12 +590,13 @@ export default function App() {
       // Render frame
       if (rendererRef.current) {
         rendererRef.current.render(
-          ZONES[player.zone],
+          currentLevel.zoneConfig,
           player,
-          NPCS,
-          interactiveObjects,
-          ZONES[player.zone].weather,
-          dt
+          activeNPCs,
+          activeObjects,
+          currentLevel.zoneConfig.weather,
+          dt,
+          currentCounty
         );
       }
 
@@ -545,7 +605,17 @@ export default function App() {
 
     animId = requestAnimationFrame(gameLoop);
     return () => cancelAnimationFrame(animId);
-  }, [inGame, player.zone, player.x, player.y, player.isListening, interactiveObjects]);
+  }, [
+    inGame,
+    player.x,
+    player.y,
+    player.isListening,
+    activeObjects,
+    activeNPC,
+    activeNPCs,
+    currentLevel,
+    currentCounty,
+  ]);
 
   // Periodic Auto-save every 10 seconds
   useEffect(() => {
@@ -611,6 +681,16 @@ export default function App() {
               },
             ];
           });
+        } else {
+          // County specialty gift
+          const specialty = currentLevel.specialtyItem;
+          setInventory((prev) => {
+            const existing = prev.find((i) => i.id === specialty.id);
+            if (existing) {
+              return prev.map((i) => (i.id === specialty.id ? { ...i, count: i.count + 1 } : i));
+            }
+            return [...prev, specialty];
+          });
         }
       } else if (option.action === 'start_listening') {
         handleTriggerListening();
@@ -629,13 +709,13 @@ export default function App() {
         return;
       }
 
-      if (option.nextId && DIALOGUES[option.nextId]) {
-        setActiveDialogue(DIALOGUES[option.nextId]);
+      if (option.nextId && allDialogues[option.nextId]) {
+        setActiveDialogue(allDialogues[option.nextId]);
       } else {
         setActiveDialogue(null);
       }
     },
-    [activeDialogue, currentQuestId, handleTriggerListening]
+    [activeDialogue, allDialogues, currentLevel, currentQuestId, handleTriggerListening]
   );
 
   // Use Item Handler
@@ -687,6 +767,75 @@ export default function App() {
     setShowMapModal(false);
   }, []);
 
+  // Travel to specific county from 3D Ink-Wash Map
+  const handleTravelToCounty = useCallback((county: CountyData) => {
+    sound.playPickup();
+    setCurrentCountyId(county.id);
+    setVisitedCounties((prev) => Array.from(new Set([...(Array.isArray(prev) ? prev : []), county.id])));
+
+    // Map terrain to best zone template
+    let targetZone: ZoneId = 'meadow';
+    const combined = county.terrainType + county.naturalLandmark.name;
+    if (combined.includes('丹霞') || combined.includes('沙') || combined.includes('戈壁') || combined.includes('雅丹')) {
+      targetZone = 'danxia';
+    } else if (combined.includes('林') || combined.includes('峡') || combined.includes('山原') || combined.includes('花海')) {
+      targetZone = 'forest';
+    } else if (combined.includes('冰川') || combined.includes('雪峰') || combined.includes('极高') || combined.includes('雪山')) {
+      targetZone = 'glacier';
+    }
+
+    setPlayer((prev) => {
+      const existingVisited = Array.isArray(prev?.visitedCounties)
+        ? prev.visitedCounties
+        : Array.isArray(visitedCounties)
+        ? visitedCounties
+        : ['sunan'];
+
+      return {
+        ...prev,
+        zone: targetZone,
+        currentCountyId: county.id,
+        x: 320,
+        y: 350,
+        targetX: 320,
+        targetY: 350,
+        moving: false,
+        visitedCounties: Array.from(new Set([...existingVisited, county.id])),
+      };
+    });
+    setShow3DMapModal(false);
+  }, [visitedCounties]);
+
+  // Apply reward from County Adventure Story
+  const handleApplyAdventureReward = useCallback(
+    (statChange: { temp?: number; stamina?: number }, itemReward?: Item) => {
+      sound.playPickup();
+      setPlayer((prev) => {
+        const existingVisited = Array.isArray(prev?.visitedCounties) ? prev.visitedCounties : ['sunan'];
+        return {
+          ...prev,
+          bodyTemp: Math.min(37.0, Math.max(30.0, prev.bodyTemp + (statChange.temp || 0))),
+          stamina: Math.min(prev.maxStamina, Math.max(0, prev.stamina + (statChange.stamina || 0))),
+          visitedCounties: Array.from(new Set([...existingVisited, currentCountyId])),
+        };
+      });
+
+      if (itemReward) {
+        setInventory((prev) => {
+          const existing = prev.find((i) => i.id === itemReward.id);
+          if (existing) {
+            return prev.map((i) => (i.id === itemReward.id ? { ...i, count: i.count + 1 } : i));
+          }
+          return [...prev, itemReward];
+        });
+      }
+
+      setVisitedCounties((prev) => Array.from(new Set([...(Array.isArray(prev) ? prev : []), currentCountyId])));
+      setCompletedCountyQuests((prev) => Array.from(new Set([...prev, currentCountyId])));
+    },
+    [currentCountyId]
+  );
+
   const activeQuest = QUESTS.find((q) => q.id === currentQuestId);
 
   return (
@@ -703,13 +852,20 @@ export default function App() {
       {/* In-Game HUD overlay */}
       {inGame && (
         <GameHUD
-          zone={ZONES[player.zone]}
+          zone={currentLevel.zoneConfig}
           player={player}
+          currentCounty={currentCounty}
+          visitedCounties={visitedCounties}
+          completedCountyQuests={completedCountyQuests}
           activeQuest={activeQuest}
+          countyQuest={currentLevel.countyQuest}
           isMuted={isMuted}
           onToggleMute={handleToggleMute}
           onOpenInventory={() => setShowInventoryModal(true)}
           onOpenMap={() => setShowMapModal(true)}
+          onOpen3DMap={() => setShow3DMapModal(true)}
+          onOpenChronicle={() => setShowChronicleModal(true)}
+          onOpenAdventure={() => setShowAdventureModal(true)}
           onOpenLore={() => setShowLoreModal(true)}
           onOpenDeployGuide={() => setShowDeployGuide(true)}
           onListen={handleTriggerListening}
@@ -744,6 +900,8 @@ export default function App() {
             onToggleMute={handleToggleMute}
             onStartNewGame={startNewGame}
             onContinueGame={loadGame}
+            onOpen3DMap={() => setShow3DMapModal(true)}
+            onOpenChronicle={() => setShowChronicleModal(true)}
             onOpenLore={() => setShowLoreModal(true)}
             onOpenDeployGuide={() => setShowDeployGuide(true)}
           />
@@ -787,6 +945,47 @@ export default function App() {
         />
       )}
 
+      {show3DMapModal && (
+        <InkWashMap3D
+          currentCountyId={currentCountyId}
+          visitedCounties={visitedCounties}
+          completedCountyQuests={completedCountyQuests}
+          onTravelToCounty={handleTravelToCounty}
+          onOpenChronicle={() => {
+            setShow3DMapModal(false);
+            setShowChronicleModal(true);
+          }}
+          onClose={() => setShow3DMapModal(false)}
+        />
+      )}
+
+      {showChronicleModal && (
+        <CountyChronicleModal
+          currentCountyId={currentCountyId}
+          visitedCounties={visitedCounties}
+          completedCountyQuests={completedCountyQuests}
+          onTravelToCounty={(county) => {
+            handleTravelToCounty(county);
+            setShowChronicleModal(false);
+            if (!inGame) {
+              setInGame(true);
+              sound.startWind(0.3);
+              sound.startAmbientMusic();
+            }
+          }}
+          onClose={() => setShowChronicleModal(false)}
+        />
+      )}
+
+      {showAdventureModal && (
+        <CountyAdventureModal
+          county={currentCounty}
+          story={currentLevel.adventureStory}
+          onApplyReward={handleApplyAdventureReward}
+          onClose={() => setShowAdventureModal(false)}
+        />
+      )}
+
       {showLoreModal && (
         <LoreModal onClose={() => setShowLoreModal(false)} />
       )}
@@ -799,8 +998,9 @@ export default function App() {
             completedQuests: completedQuestIds,
             currentQuestId,
             unlockedZones,
-            collectedObjects: interactiveObjects.filter((o) => o.collected).map((o) => o.id),
-            litCampfires: interactiveObjects.filter((o) => o.type === 'campfire' && o.lit).map((o) => o.id),
+            collectedObjects: collectedObjectIds,
+            litCampfires: litCampfireIds,
+            visitedCounties,
             activeEnding: endingType || undefined,
             timestamp: Date.now(),
           }}
